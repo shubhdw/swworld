@@ -1,0 +1,357 @@
+<title>Out Loud</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500&family=Instrument+Serif:ital@0;1&display=swap">
+<style>
+/* Layout: one 9:16 reel stage, centred, with quiet controls and the script underneath. Single dark look by choice. */
+:root {
+  --night: #0b0a10;
+  --stage: #07060b;
+  --ember: #f2b36a;
+  --bone: #f4e9dc;
+  --ash: #8a8494;
+  --line: #24212c;
+  --f-say: "Inter", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --f-show: "Instrument Serif", "Iowan Old Style", Georgia, serif;
+  color-scheme: dark;
+}
+html, body { background: var(--night); color: var(--bone); }
+body {
+  font-family: var(--f-say);
+  padding-block: 20px 40px;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+  display: flex; flex-direction: column; align-items: center; gap: 18px;
+}
+.stage {
+  position: relative;
+  width: min(100%, calc((100svh - 140px) * 9 / 16), 420px);
+  min-width: 240px;
+  aspect-ratio: 9 / 16;
+  max-width: 100%;
+  background: var(--stage);
+  border-radius: 14px;
+  overflow: hidden;
+  container-type: inline-size;
+  box-shadow: 0 30px 80px -30px #000, 0 0 0 1px var(--line);
+}
+canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+.cap {
+  position: absolute; margin: 0;
+  font-size: 4.3cqw; line-height: 1.28; font-weight: 500;
+  text-align: center; text-wrap: balance;
+  color: var(--bone);
+  text-shadow: 0 1px 10px #000, 0 0 2px #000;
+  opacity: 0; pointer-events: none;
+}
+.cap.a { left: 7%; top: 11%; width: 46%; }
+.cap.b { right: 6%; top: 16.5%; width: 44%; }
+.cap.c { left: 10%; right: 10%; top: 40%; font-family: var(--f-show); font-weight: 400; font-size: 7.4cqw; line-height: 1.12; }
+.cap.c small { display: block; margin-top: 5cqw; font-family: var(--f-say); font-size: 3cqw; letter-spacing: .14em; text-transform: uppercase; color: var(--ash); }
+.cap.t { left: 6%; right: 6%; top: 62%; font-family: var(--f-show); font-weight: 400; }
+.cap.t b { display: block; font-weight: 400; font-style: italic; font-size: 9cqw; line-height: 1; color: var(--bone); }
+.cap.t span { display: block; margin-top: 3.5cqw; font-family: var(--f-say); font-size: 3.4cqw; letter-spacing: .16em; text-transform: uppercase; color: var(--ember); }
+.bar { position: absolute; left: 0; bottom: 0; height: 2px; background: var(--ember); opacity: .55; width: 0; }
+.controls { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; justify-content: center; }
+button {
+  font: 500 13px/1 var(--f-say); color: var(--bone); background: transparent;
+  border: 1px solid var(--line); border-radius: 999px; padding: 10px 16px; cursor: pointer;
+}
+button:hover { border-color: var(--ash); }
+button:focus-visible { outline: 2px solid var(--ember); outline-offset: 2px; }
+.note { font-size: 12px; color: var(--ash); }
+details { width: min(100%, 420px); border-top: 1px solid var(--line); padding-top: 12px; }
+summary { cursor: pointer; font-size: 13px; color: var(--ash); letter-spacing: .08em; text-transform: uppercase; }
+.script { margin: 14px 0 0; padding: 0; list-style: none; display: grid; gap: 8px; font-size: 14px; line-height: 1.45; }
+.script li { display: grid; grid-template-columns: 22px 1fr; gap: 8px; }
+.script .who { color: var(--ash); font-size: 12px; padding-top: 2px; }
+.script .b { color: var(--ember); }
+body.capture { padding: 0; gap: 0; display: block; }
+body.capture .stage { width: 360px; border-radius: 0; box-shadow: none; }
+body.capture .controls, body.capture details, body.capture .bar { display: none; }
+@media (prefers-reduced-motion: reduce) { .bar { display: none; } }
+</style>
+
+<div class="stage" id="stage">
+  <canvas id="cv" width="720" height="1280" aria-label="Animated reel: a conversation about what men carry, drawn in drifting light"></canvas>
+  <div id="caps"></div>
+  <div class="bar" id="bar"></div>
+</div>
+<div class="controls">
+  <button id="play" type="button">Pause</button>
+  <button id="restart" type="button">Restart</button>
+  <span class="note">52 seconds · silent · 19 November</span>
+</div>
+<details>
+  <summary>Script</summary>
+  <ul class="script" id="script"></ul>
+</details>
+
+<script>
+(() => {
+  const W = 360, H = 640, SCALE = 2, N = 2400, FPS = 30, DT = 1 / FPS;
+  const capture = location.hash === '#capture';
+  if (capture) document.body.classList.add('capture');
+
+  // ---- seeded random so every play (and the video render) is identical
+  let seed = 19111999;
+  const rnd = () => ((seed = (seed * 1664525 + 1013904223) >>> 0) / 4294967296);
+
+  // ---- timeline
+  const SCENES = [
+    { t: 0,    shape: 'man' },
+    { t: 4.5,  shape: 'manLow' },
+    { t: 8,    shape: 'txt:I’m tired.' },
+    { t: 10,   shape: 'txt:I’m scared.' },
+    { t: 12,   shape: 'txt:I need help.' },
+    { t: 14,   shape: 'boy' },
+    { t: 18,   shape: 'door' },
+    { t: 23,   shape: 'chest' },
+    { t: 27,   shape: null, mode: 'fall' },
+    { t: 31.5, shape: 'man' },
+    { t: 36.3, shape: null, mode: 'burst' },
+    { t: 42,   shape: 'two' },
+    { t: 46.5, shape: 'txt2:19.11' },
+  ];
+  const END = 53;
+  const CAPS = [
+    ['a', 0.4, 4.3, 'What’s the heaviest thing a man carries?'],
+    ['b', 1.9, 4.3, 'Not what’s on his shoulders.'],
+    ['a', 4.7, 7.9, 'Then what?'],
+    ['b', 5.7, 7.9, 'What he never says.'],
+    ['a', 8.2, 13.8, 'Like what?'],
+    ['a', 14.2, 17.8, 'Why doesn’t he say it?'],
+    ['b', 15.3, 17.8, 'Someone once told him not to.'],
+    ['a', 18.2, 22.8, 'Who?'],
+    ['b', 19.0, 22.8, 'A coach. A father, at a door. Then himself, every night since.'],
+    ['a', 23.2, 26.8, 'So where does it all go?'],
+    ['b', 24.5, 26.8, 'Here.'],
+    ['c', 27.4, 31.2, 'Worldwide, men die by suicide at more than twice the rate of women.<small>WHO · Suicide worldwide in 2019</small>'],
+    ['a', 31.7, 36.1, 'Does it ever leave?'],
+    ['b', 32.9, 36.1, 'Only one way.'],
+    ['a', 36.2, 41.8, 'How?'],
+    ['b', 37.0, 41.8, 'Out loud.'],
+    ['a', 42.2, 46.3, 'Who do I tell?'],
+    ['b', 43.3, 46.3, 'Anyone who asks you twice.'],
+    ['t', 48.0, END, '<b>International Men’s Day</b><span>Ask twice · Say it out loud</span>'],
+  ];
+
+  // ---- caption elements + script list
+  const capsEl = document.getElementById('caps');
+  const capEls = CAPS.map(([k, , , html]) => {
+    const p = document.createElement('p');
+    p.className = 'cap ' + k;
+    p.innerHTML = k === 'a' || k === 'b' ? '“' + html + '”' : html;
+    capsEl.appendChild(p);
+    return p;
+  });
+  const list = document.getElementById('script');
+  CAPS.forEach(([k, , , html]) => {
+    const li = document.createElement('li');
+    const who = k === 'a' ? 'A' : k === 'b' ? 'B' : '—';
+    li.innerHTML = `<span class="who">${who}</span><span class="${k === 'b' ? 'b' : ''}">${html.replace(/<small>|<span>/g, ' · ').replace(/<[^>]+>/g, '')}</span>`;
+    list.appendChild(li);
+  });
+
+  // ---- shape sampling on an offscreen canvas
+  const off = document.createElement('canvas');
+  off.width = W; off.height = H;
+  const ox = off.getContext('2d', { willReadFrequently: true });
+
+  function silhouette(g, cx, top, s) {
+    g.beginPath();
+    g.arc(cx, top + 46 * s, 40 * s, 0, Math.PI * 2);
+    g.moveTo(cx - 20 * s, top + 80 * s);
+    g.lineTo(cx - 22 * s, top + 108 * s);
+    g.bezierCurveTo(cx - 70 * s, top + 118 * s, cx - 112 * s, top + 132 * s, cx - 124 * s, top + 190 * s);
+    g.lineTo(cx - 138 * s, top + 330 * s);
+    g.lineTo(cx + 138 * s, top + 330 * s);
+    g.lineTo(cx + 124 * s, top + 190 * s);
+    g.bezierCurveTo(cx + 112 * s, top + 132 * s, cx + 70 * s, top + 118 * s, cx + 22 * s, top + 108 * s);
+    g.lineTo(cx + 20 * s, top + 80 * s);
+  }
+  function heart(g, cx, cy, s) {
+    g.beginPath();
+    g.moveTo(cx, cy + 14 * s);
+    g.bezierCurveTo(cx - 30 * s, cy - 6 * s, cx - 14 * s, cy - 28 * s, cx, cy - 12 * s);
+    g.bezierCurveTo(cx + 14 * s, cy - 28 * s, cx + 30 * s, cy - 6 * s, cx, cy + 14 * s);
+    g.fill();
+  }
+  function sample(draw, step = 2) {
+    ox.clearRect(0, 0, W, H);
+    ox.fillStyle = '#fff'; ox.strokeStyle = '#fff';
+    draw(ox);
+    const d = ox.getImageData(0, 0, W, H).data, pts = [];
+    for (let y = 0; y < H; y += step) for (let x = 0; x < W; x += step)
+      if (d[(y * W + x) * 4 + 3] > 128) pts.push([x + rnd() * step, y + rnd() * step]);
+    return pts;
+  }
+  function pick(pts, n) {
+    const out = [];
+    for (let i = 0; i < n; i++) out.push(pts.length ? pts[(rnd() * pts.length) | 0] : [W / 2, H / 2]);
+    return out;
+  }
+  // a shape is outline (bright, dense) + body (sparse haze)
+  function figure(drawFill, drawLine, extra) {
+    const line = sample(g => { g.lineWidth = 2.4; drawLine(g); g.stroke(); });
+    const body = sample(g => { drawFill(g); g.fill(); }, 3);
+    let pts = pick(line, Math.round(N * 0.62)).concat(pick(body, Math.round(N * 0.38)));
+    if (extra) pts = pick(line, Math.round(N * 0.5)).concat(pick(body, Math.round(N * 0.2)), pick(extra, N - Math.round(N * 0.7)));
+    return pts.slice(0, N);
+  }
+  const SHAPES = {};
+  function build(name) {
+    if (SHAPES[name]) return SHAPES[name];
+    let pts;
+    if (name === 'man') pts = figure(g => silhouette(g, 180, 300, 1), g => silhouette(g, 180, 300, 1));
+    else if (name === 'manLow') pts = figure(g => silhouette(g, 180, 350, 1), g => silhouette(g, 180, 350, 1)).map(([x, y]) => [x, y + (y > 560 ? 0 : (y - 350) * 0.08)]);
+    else if (name === 'boy') pts = figure(g => silhouette(g, 180, 380, 0.68), g => silhouette(g, 180, 380, 0.68));
+    else if (name === 'chest') pts = figure(g => silhouette(g, 180, 300, 1), g => silhouette(g, 180, 300, 1), sample(g => heart(g, 172, 520, 1.25), 1));
+    else if (name === 'two') pts = figure(g => { silhouette(g, 122, 330, 0.8); g.fill(); silhouette(g, 244, 318, 0.84); }, g => { silhouette(g, 122, 330, 0.8); g.stroke(); silhouette(g, 244, 318, 0.84); });
+    else if (name === 'door') {
+      const frame = sample(g => { g.lineWidth = 2.6; g.strokeRect(110, 250, 140, 300); g.beginPath(); g.moveTo(80, 550); g.lineTo(280, 550); g.stroke(); });
+      const slit = sample(g => { g.fillRect(232, 254, 6, 292); g.beginPath(); g.moveTo(238, 550); g.lineTo(300, 640); g.lineTo(250, 640); g.lineTo(232, 550); g.fill(); }, 1);
+      pts = pick(frame, N * 0.55 | 0).concat(pick(slit, N - (N * 0.55 | 0)));
+    } else if (name.startsWith('txt')) {
+      const big = name.startsWith('txt2');
+      const s = name.slice(name.indexOf(':') + 1);
+      pts = pick(sample(g => {
+        g.font = `italic ${big ? 120 : 62}px "Instrument Serif", Georgia, serif`;
+        g.textAlign = 'center'; g.textBaseline = 'middle';
+        g.fillText(s, W / 2, big ? 330 : 420);
+      }, 1), N);
+    }
+    for (let i = pts.length - 1; i > 0; i--) { const j = (rnd() * (i + 1)) | 0; [pts[i], pts[j]] = [pts[j], pts[i]]; }
+    return (SHAPES[name] = pts);
+  }
+
+  // ---- particles
+  const P = [];
+  function reset() {
+    seed = 19111999;
+    P.length = 0;
+    for (let i = 0; i < N; i++) {
+      const r = rnd();
+      P.push({
+        x: rnd() * W, y: rnd() * H, vx: 0, vy: 0, tx: W / 2, ty: H / 2,
+        size: 0.5 + rnd() * rnd() * 1.6,
+        hue: r < 0.08 ? 2 : r < 0.55 ? 0 : 1,
+        ph: rnd() * 6.283, sp: 0.6 + rnd() * 2.2,
+        sx: rnd() * W, sy: rnd() * H,
+      });
+    }
+  }
+  const COL = ['242,179,106', '244,233,220', '150,176,255'];
+
+  let t = 0, sceneIx = -1, mode = 'form';
+  function enter(ix) {
+    const sc = SCENES[ix];
+    mode = sc.mode || 'form';
+    if (sc.shape) {
+      const pts = build(sc.shape);
+      P.forEach((p, i) => { p.tx = pts[i][0]; p.ty = pts[i][1]; p.vx += (rnd() - 0.5) * 2.4; p.vy += (rnd() - 0.5) * 2.4; });
+    } else if (mode === 'burst') {
+      P.forEach(p => {
+        const dx = p.x - 180, dy = p.y - 470, d = Math.hypot(dx, dy) + 0.001;
+        const f = 9 + rnd() * 16;
+        p.vx += dx / d * f; p.vy += dy / d * f;
+        p.tx = p.sx; p.ty = p.sy;
+      });
+    }
+  }
+
+  const cv = document.getElementById('cv'), cx = cv.getContext('2d');
+  cx.scale(SCALE, SCALE);
+  const bar = document.getElementById('bar');
+
+  function step() {
+    let ix = 0;
+    for (let i = 0; i < SCENES.length; i++) if (t >= SCENES[i].t) ix = i;
+    if (ix !== sceneIx) { sceneIx = ix; enter(ix); }
+    const sinceScene = t - SCENES[ix].t;
+    const k = mode === 'burst' ? (sinceScene < 0.6 ? 0 : 0.006) : 0.028;
+    const damp = mode === 'burst' ? 0.9 : 0.86;
+    for (const p of P) {
+      if (mode === 'fall') {
+        p.vy += 0.035 * p.sp; p.vx += Math.sin(t * 0.9 + p.ph) * 0.03;
+        p.vx *= 0.96; p.vy *= 0.96;
+        if (p.y > H + 4) { p.y = -4; p.x = p.sx; }
+      } else {
+        p.vx += (p.tx - p.x) * k + Math.sin(t * p.sp + p.ph) * 0.06;
+        p.vy += (p.ty - p.y) * k + Math.cos(t * p.sp * 0.8 + p.ph) * 0.06;
+        p.vx *= damp; p.vy *= damp;
+      }
+      p.x += p.vx; p.y += p.vy;
+    }
+    t += DT;
+    if (t >= END) { t = 0; sceneIx = -1; reset(); }
+  }
+
+  function fade(a, b) {
+    const i = Math.min(1, (t - a) / 0.35), o = Math.min(1, (b - t) / 0.35);
+    return t < a || t > b ? 0 : Math.max(0, Math.min(i, o));
+  }
+
+  function render() {
+    // background: deep night with a faint warm well behind the figure
+    cx.globalCompositeOperation = 'source-over';
+    cx.fillStyle = 'rgba(7,6,11,0.42)';
+    cx.fillRect(0, 0, W, H);
+    const glow = cx.createRadialGradient(180, 470, 10, 180, 470, 300);
+    const warm = mode === 'burst' ? 0.05 : 0.025;
+    glow.addColorStop(0, `rgba(242,179,106,${warm})`);
+    glow.addColorStop(1, 'rgba(242,179,106,0)');
+    cx.fillStyle = glow; cx.fillRect(0, 0, W, H);
+
+    cx.globalCompositeOperation = 'lighter';
+    for (const p of P) {
+      const tw = 0.55 + 0.45 * Math.sin(t * p.sp * 1.7 + p.ph);
+      const speed = Math.min(1, Math.hypot(p.vx, p.vy) / 6);
+      cx.fillStyle = `rgba(${COL[p.hue]},${(0.35 + 0.5 * tw) * (p.hue === 2 ? 0.8 : 1)})`;
+      const r = p.size * (1 + speed * 0.8);
+      cx.fillRect(p.x - r / 2, p.y - r / 2, r, r);
+      if (p.size > 1.5) {
+        cx.fillStyle = `rgba(${COL[p.hue]},${0.08 * tw})`;
+        cx.beginPath(); cx.arc(p.x, p.y, p.size * 3.2, 0, 6.283); cx.fill();
+      }
+    }
+    // vignette
+    cx.globalCompositeOperation = 'source-over';
+    const v = cx.createRadialGradient(180, 320, 200, 180, 320, 420);
+    v.addColorStop(0, 'rgba(0,0,0,0)'); v.addColorStop(1, 'rgba(0,0,0,0.55)');
+    cx.fillStyle = v; cx.fillRect(0, 0, W, H);
+
+    CAPS.forEach(([, a, b], i) => { capEls[i].style.opacity = fade(a, b).toFixed(3); });
+    bar.style.width = (t / END * 100).toFixed(2) + '%';
+  }
+
+  reset();
+  // warm start: settle the first figure so the opening frame is already drawn
+  if (!capture) { for (let i = 0; i < 10; i++) step(); t = 0; sceneIx = 0; }
+
+  let playing = !capture, last = 0, acc = 0;
+  const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
+  function loop(now) {
+    if (playing) {
+      acc += Math.min(0.1, (now - last) / 1000 || 0);
+      while (acc >= DT) { step(); acc -= DT; }
+      render();
+    }
+    last = now;
+    requestAnimationFrame(loop);
+  }
+  render();
+  if (!capture) requestAnimationFrame(loop);
+
+  const playBtn = document.getElementById('play');
+  if (reduce && !capture) { playing = false; playBtn.textContent = 'Play'; }
+  playBtn.addEventListener('click', () => { playing = !playing; playBtn.textContent = playing ? 'Pause' : 'Play'; });
+  document.getElementById('restart').addEventListener('click', () => {
+    t = 0; sceneIx = -1; reset(); playing = true; playBtn.textContent = 'Pause';
+  });
+
+  // frame-exact hooks used to render the video file
+  window.__frame = () => { step(); render(); return t; };
+  window.__end = END;
+})();
+</script>
